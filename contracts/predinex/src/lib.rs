@@ -63,6 +63,24 @@ mod webhook_test;
 //   * The contract MUST never emit two version markers for the same event in
 //     the same release; consumers can rely on exactly one version per event.
 //
+// Documented deviation — `pool_unfrozen` payload (#1309):
+//   The `pool_unfrozen` data payload was widened from a bare `Address` to
+//   `PoolUnfrozenEvent { actor, trigger, had_cooling_deadline }`. The topics
+//   are unchanged, so the version marker deliberately stays `"v1"`, for two
+//   reasons:
+//     1. Topic position 1 is what indexers filter on, and #1230 added this
+//        event specifically so state reconstruction always observes the
+//        Frozen -> Open transition. Bumping the marker would make every
+//        consumer pinned to `"v1"` silently drop all future events, defeating
+//        the reason the event exists.
+//     2. The marker is a single crate-wide constant shared by every event;
+//        there is no per-event marker. Bumping it would relabel all events,
+//        which is a far larger coordinated change than this fix.
+//   Consumers that parse the data payload must therefore accept both the
+//   legacy bare-`Address` shape (still present in historical events, which
+//   cannot be rewritten) and the new struct. See `web/docs/CONTRACT_EVENTS.md`.
+//   If a future change does alter topics, the marker MUST be bumped.
+//
 // See `web/docs/CONTRACT_EVENTS.md` for the full per-event schema and the
 // upgrade expectations published to consumers.
 pub const EVENT_SCHEMA_VERSION: &str = "v1";
@@ -841,14 +859,29 @@ fn emit_pool_token_bet_limits_set(
     );
 }
 
-fn emit_pool_unfrozen(env: &Env, pool_id: u32, caller: Address) {
+/// #1309 — Publishes the `Frozen -> Open` transition.
+///
+/// `trigger` disambiguates the administrative path from the automatic
+/// cooling-period path; without it both emitted an identical event carrying
+/// only a caller address, so the thaw was attributed to a random bettor.
+fn emit_pool_unfrozen(
+    env: &Env,
+    pool_id: u32,
+    actor: Address,
+    trigger: UnfreezeTrigger,
+    had_cooling_deadline: bool,
+) {
     env.events().publish(
         (
             Symbol::new(env, "pool_unfrozen"),
             event_version(env),
             pool_id,
         ),
-        caller,
+        PoolUnfrozenEvent {
+            actor,
+            trigger,
+            had_cooling_deadline,
+        },
     );
 }
 
@@ -1422,6 +1455,48 @@ pub enum SettlementSource {
     Expired,
     /// Delegated settlement.
     Delegated,
+}
+
+/// #1309 — Identifies what caused a pool to transition back to `Open`.
+///
+/// `pool_unfrozen` is emitted from two paths with very different actors: a
+/// freeze admin calling `unfreeze_pool`, and the first `place_bet` submitted
+/// after an automatic cooling period elapses. Without this tag an indexer
+/// cannot tell an administrative unfreeze from a bettor incidentally
+/// reopening a pool, so "which admin unfroze this pool" answers wrongly and
+/// attributes an administrative action to an unrelated account.
+///
+/// Mirrors `SettlementSource` (#176), which solves the same ambiguity for
+/// settlements.
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub enum UnfreezeTrigger {
+    /// A freeze admin called `unfreeze_pool`. The actor is that admin.
+    Admin,
+    /// An automatic cooling period elapsed and the first `place_bet` reopened
+    /// the pool. The actor is that bettor, **not** an administrator.
+    AutoThaw,
+}
+
+/// #1309 — Event payload emitted by `pool_unfrozen`.
+///
+/// Previously the payload was a bare `Address` (the caller), which was
+/// ambiguous across the admin and auto-thaw paths. The `actor` field keeps the
+/// address that signed the triggering transaction so existing consumers that
+/// only need "who" keep working; `trigger` disambiguates the cause.
+#[derive(Clone)]
+#[contracttype]
+pub struct PoolUnfrozenEvent {
+    /// Address that triggered the transition: the freeze admin for
+    /// `UnfreezeTrigger::Admin`, or the bettor whose bet ended the cooling
+    /// period for `UnfreezeTrigger::AutoThaw`.
+    pub actor: Address,
+    /// What caused the Frozen -> Open transition.
+    pub trigger: UnfreezeTrigger,
+    /// Whether a `PoolCoolingUntil` deadline was set when the pool was frozen.
+    /// Lets an indexer distinguish a cooling-lock expiry from a manual freeze
+    /// without having to reconstruct it from `pool_cooling_started`.
+    pub had_cooling_deadline: bool,
 }
 
 /// #396 — Event types that can trigger an off-chain webhook notification.
@@ -4526,7 +4601,18 @@ impl PredinexContract {
                     // #1230 — emit the same pool_unfrozen event as the
                     // dedicated unfreeze_pool path so indexers always observe
                     // the Frozen→Open transition.
-                    emit_pool_unfrozen(&env, pool_id, user.clone());
+                    // #1309 — tagged AutoThaw. `user` is the bettor whose bet
+                    // happened to land after the cooling period elapsed, not an
+                    // administrator, so consumers must not read this as an
+                    // admin action. A cooling deadline is necessarily present
+                    // here, hence `true`.
+                    emit_pool_unfrozen(
+                        &env,
+                        pool_id,
+                        user.clone(),
+                        UnfreezeTrigger::AutoThaw,
+                        true,
+                    );
                 } else {
                     return Err(ContractError::PoolIsFrozen);
                 }
@@ -7516,6 +7602,14 @@ impl PredinexContract {
             pool.status = PoolStatus::Open;
         }
 
+        // #1309 — Read the cooling deadline before clearing it so the event can
+        // report whether this freeze was a cooling lock or a manual freeze.
+        let had_cooling_deadline = env
+            .storage()
+            .persistent()
+            .get::<_, u64>(&DataKey::PoolCoolingUntil(pool_id))
+            .is_some();
+
         env.storage()
             .persistent()
             .remove(&DataKey::PoolCoolingUntil(pool_id));
@@ -7528,7 +7622,9 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        emit_pool_unfrozen(&env, pool_id, caller);
+        // #1309 — tagged Admin so consumers can distinguish this from a bettor's
+        // bet auto-thawing a pool whose cooling period had elapsed.
+        emit_pool_unfrozen(&env, pool_id, caller, UnfreezeTrigger::Admin, had_cooling_deadline);
         Ok(())
     }
 
