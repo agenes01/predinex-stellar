@@ -97,6 +97,7 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'create.params.externalLinksHint': 'Reference URLs (pipe-separated for multiple). Immutable once the first bet is placed.',
     'create.params.estimatedFeesTitle': 'Estimated fees',
     'create.params.protocolFeeRow': 'Protocol fee',
+    'create.params.creatorDepositRow': 'Creator deposit',
     'create.params.networkFeeRow': 'Network fee (simulated)',
     'create.params.totalEstimate': 'Total estimate',
     // Create wizard — outcomes
@@ -243,6 +244,7 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'create.params.externalLinksHint': 'URLs de referencia (separadas por | para múltiples). Inmutable una vez que se realice la primera apuesta.',
     'create.params.estimatedFeesTitle': 'Tarifas estimadas',
     'create.params.protocolFeeRow': 'Tarifa de protocolo',
+    'create.params.creatorDepositRow': 'Depósito del creador',
     'create.params.networkFeeRow': 'Tarifa de red (simulada)',
     'create.params.totalEstimate': 'Estimación total',
     // Create wizard — outcomes
@@ -389,6 +391,7 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'create.params.externalLinksHint': 'URLs de référence (séparées par | pour plusieurs). Immuable une fois le premier pari placé.',
     'create.params.estimatedFeesTitle': 'Frais estimés',
     'create.params.protocolFeeRow': 'Frais de protocole',
+    'create.params.creatorDepositRow': 'Dépôt du créateur',
     'create.params.networkFeeRow': 'Frais réseau (simulé)',
     'create.params.totalEstimate': 'Estimation totale',
     // Create wizard — outcomes

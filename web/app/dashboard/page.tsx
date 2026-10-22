@@ -10,7 +10,6 @@ import { useClaimWinnings } from '../lib/hooks/useClaimWinnings';
 import { calculatePortfolio } from '../lib/dashboard-utils';
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import { EmptyState } from '../../components/EmptyState';
-import { DisconnectedState } from '../../components/DisconnectedState';
 import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 import ExportButton from '../../components/ExportButton';
 
@@ -55,7 +54,7 @@ const FavoritePoolsCard = dynamic(() => import('../components/dashboard/Favorite
 });
 
 function DashboardContent() {
-  const { address: stxAddress, isConnected } = useWallet();
+  const { address: stxAddress } = useWallet();
   const { claimTransactions, claim, feePrompt, setFeePrompt, stage, setStage } = useClaimWinnings(stxAddress);
   const {
     activities,
@@ -70,10 +69,8 @@ function DashboardContent() {
     refresh: refreshBets,
   } = useActiveBets(stxAddress);
 
-  if (!isConnected) {
-    return <DisconnectedState />;
-  }
-
+  // Disconnected users fall through to WalletConnectGate below, which keeps
+  // the navbar and offers a working connect button.
   return (
     <main className="min-h-screen bg-background">
       <Navbar />

@@ -291,6 +291,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                                 className="font-bold justify-center"
                                 secondsRemaining={secondsUntil(pool.expiry)}
                                 settled={pool.settled}
+                                announce
                             />
                         </div>
                     </div>
